@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UX Player">
+<meta name="theme-color" content="#000000">
+<title>UX Prototype Player</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- Library -->
+  <section id="library" class="screen">
+    <header class="lib-header">
+      <div>
+        <h1>UX Prototype Player</h1>
+        <p class="sub" id="storage-info"></p>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="btn-help" type="button">도움말</button>
+        <button class="btn primary" id="btn-import" type="button">가져오기</button>
+        <input type="file" id="file-input" accept=".zip,application/zip" multiple hidden>
+      </div>
+    </header>
+    <div id="install-hint" class="banner" hidden>
+      <b>홈 화면에 추가하면</b> 앱처럼 전체 화면으로 열리고, 인터넷 없이도 실행됩니다.
+      Safari 주소창 옆 <b>공유 버튼</b>(네모 위 화살표) ▸ <b>홈 화면에 추가</b>
+      <button class="link" id="btn-hide-hint" type="button">닫기</button>
+    </div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden>
+      <div class="empty-icon">▶︎</div>
+      <h2>아직 가져온 프로토타입이 없습니다</h2>
+      <p>Mac 앱에서 <b>iPad 웹 플레이어용 내보내기</b>로 만든 <b>.uxplay.zip</b> 파일을<br>
+        iCloud Drive·메일·메신저 등으로 iPad에 옮긴 뒤 <b>가져오기</b>를 누르세요.</p>
+      <button class="btn primary big" id="btn-import-empty" type="button">가져오기</button>
+    </div>
+  </section>
+
+  <!-- Player -->
+  <section id="player" class="screen" hidden>
+    <div id="stage-wrap">
+      <div id="stage">
+        <div id="layers"></div>
+        <div id="areas"></div>
+        <div id="marks"></div>
+        <div id="hit"></div>
+      </div>
+    </div>
+    <div id="corners"></div>
+    <div id="rotate-hint" class="pill" hidden></div>
+    <div id="start-overlay" class="overlay" hidden>
+      <div class="start-card">
+        <h2 id="start-title"></h2>
+        <p id="start-sub"></p>
+        <button class="btn primary big" id="btn-start" type="button">탭해서 시작</button>
+        <p class="hint">재생 중 메뉴: 화면 모서리(프로토타입 바깥)를 2초간 누르기 · 네 손가락으로 1초간 누르기</p>
+        <button class="btn ghost" id="btn-start-cancel" type="button">목록으로</button>
+      </div>
+    </div>
+    <div id="menu" class="overlay" hidden>
+      <div class="menu-card">
+        <p class="menu-title" id="menu-title"></p>
+        <button class="btn" id="m-restart" type="button">처음부터 다시</button>
+        <button class="btn" id="m-areas" type="button">Touch Area 보기</button>
+        <button class="btn" id="m-marks" type="button">터치 표시 켜기</button>
+        <button class="btn primary" id="m-exit" type="button">목록으로 돌아가기</button>
+        <button class="btn ghost" id="m-close" type="button">계속 재생</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dialogs -->
+  <div id="busy" class="overlay" hidden><div class="busy-card"><div class="spinner"></div><p id="busy-text">가져오는 중…</p></div></div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="help" class="overlay" hidden>
+    <div class="help-card">
+      <h2>도움말</h2>
+      <h3>프로젝트 가져오기</h3>
+      <ol>
+        <li>Mac 앱 ▸ 프로젝트 카드 ⋯ ▸ <b>iPad 웹 플레이어용 내보내기</b> (또는 ‘iPad로 보내기’ 창)</li>
+        <li>만든 <b>.uxplay.zip</b> 파일을 iCloud Drive·메일·메신저·USB 등으로 iPad 파일 앱에 옮깁니다.</li>
+        <li>여기서 <b>가져오기</b> ▸ 파일 선택. 같은 프로젝트를 다시 가져오면 새 버전으로 바뀝니다.</li>
+      </ol>
+      <h3>재생 중 조작</h3>
+      <ul>
+        <li>탭 · 스와이프(짧게 튕기기 포함)로 조작합니다.</li>
+        <li><b>메뉴 열기</b>: 프로토타입 바깥 화면 모서리를 2초간 누르기, 또는 네 손가락으로 1초간 누르기</li>
+        <li>메뉴에서 처음부터 다시 · Touch Area 보기 · 터치 표시 · 목록으로 돌아가기</li>
+        <li>키보드가 있으면: 방향키 = 스와이프, R = 처음부터, T = Touch Area, Esc = 목록으로</li>
+      </ul>
+      <h3>알아둘 점</h3>
+      <ul>
+        <li>프로젝트는 이 iPad 안에만 저장되며 외부 서버로 올라가지 않습니다.</li>
+        <li>소리는 ‘탭해서 시작’을 누른 뒤부터 나옵니다 (브라우저 정책).</li>
+        <li>홈 화면에서 실행한 UX Player와 Safari 탭은 저장 공간이 따로입니다. 늘 같은 곳(홈 화면 앱)에서 가져오고 재생하세요.</li>
+      </ul>
+      <p class="version" id="version"></p>
+      <button class="btn primary" id="btn-help-close" type="button">닫기</button>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
