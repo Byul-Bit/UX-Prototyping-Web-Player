@@ -1,5 +1,5 @@
 /* Offline cache for UX Prototype Player. Bump VERSION when any file changes. */
-const VERSION = 'ux-player-1.0.0';
+const VERSION = 'ux-player-1.1.0';
 const FILES = [
   './',
   './index.html',

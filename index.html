@@ -71,6 +71,8 @@
         <button class="btn" id="m-restart" type="button">처음부터 다시</button>
         <button class="btn" id="m-areas" type="button">Touch Area 보기</button>
         <button class="btn" id="m-marks" type="button">터치 표시 켜기</button>
+        <button class="btn" id="m-full" type="button">전체 화면으로</button>
+        <button class="btn" id="m-calib" type="button">실제 크기 보정…</button>
         <button class="btn primary" id="m-exit" type="button">목록으로 돌아가기</button>
         <button class="btn ghost" id="m-close" type="button">계속 재생</button>
       </div>
@@ -78,6 +80,26 @@
   </section>
 
   <!-- Dialogs -->
+  <div id="calib" class="overlay" hidden>
+    <div class="sheet-card calib-card">
+      <h2>실제 크기 보정</h2>
+      <p class="sub" id="c-status"></p>
+      <div class="calib-bar-wrap"><div id="c-bar" class="calib-bar"><span>100 mm</span></div></div>
+      <p class="calib-help">자를 대고 위 막대의 길이를 재 보세요. 정확히 <b>100 mm</b>가 되도록 아래 버튼으로 맞추면
+        이 iPad에서 재생하는 모든 프로젝트에 적용됩니다.</p>
+      <div class="calib-row">
+        <button class="btn" id="c-minus" type="button">−1%</button>
+        <button class="btn" id="c-minus-s" type="button">−0.2%</button>
+        <span id="c-value" class="calib-value"></span>
+        <button class="btn" id="c-plus-s" type="button">+0.2%</button>
+        <button class="btn" id="c-plus" type="button">+1%</button>
+      </div>
+      <div class="calib-row">
+        <button class="btn ghost" id="c-reset" type="button">수동 보정 없애기</button>
+        <button class="btn primary" id="c-close" type="button">완료</button>
+      </div>
+    </div>
+  </div>
   <div id="busy" class="overlay" hidden><div class="busy-card"><div class="spinner"></div><p id="busy-text">가져오는 중…</p></div></div>
   <div id="toast" class="toast" hidden></div>
   <div id="help" class="overlay" hidden>
@@ -93,13 +115,17 @@
       <ul>
         <li>탭 · 스와이프(짧게 튕기기 포함)로 조작합니다.</li>
         <li><b>메뉴 열기</b>: 프로토타입 바깥 화면 모서리를 2초간 누르기, 또는 네 손가락으로 1초간 누르기</li>
-        <li>메뉴에서 처음부터 다시 · Touch Area 보기 · 터치 표시 · 목록으로 돌아가기</li>
+        <li>메뉴에서 처음부터 다시 · Touch Area 보기 · 터치 표시 · 전체 화면 · 실제 크기 보정 · 목록으로 돌아가기</li>
+        <li>긴 이미지(스크롤 Flow)는 손가락으로 끌어 스크롤합니다. 스크롤 방향의 Swipe는 이미지 끝에 닿은 상태에서 한 번 더 밀 때 동작합니다.</li>
         <li>키보드가 있으면: 방향키 = 스와이프, R = 처음부터, T = Touch Area, Esc = 목록으로</li>
       </ul>
       <h3>알아둘 점</h3>
       <ul>
         <li>프로젝트는 이 iPad 안에만 저장되며 외부 서버로 올라가지 않습니다.</li>
-        <li>소리는 ‘탭해서 시작’을 누른 뒤부터 나옵니다 (브라우저 정책).</li>
+        <li>소리·효과음은 ‘탭해서 시작’을 누른 뒤부터 나옵니다 (브라우저 정책).</li>
+        <li><b>전체 화면</b>: ‘탭해서 시작’을 누르면 시계·날짜·배터리 표시줄까지 가린 전체 화면으로 바뀝니다. 빠져나갔다면 메뉴 ▸ 계속 재생(또는 전체 화면으로)을 누르세요.</li>
+        <li><b>실제 크기</b>: 설정 ▸ 디스플레이 및 밝기 ▸ <b>화면 확대/축소</b>가 ‘더 많은 공간’이면 화면이 작게 그려집니다. 플레이어가 자동으로 감지해 보정하며, 자로 재서 미세 조정할 수도 있습니다.
+          <button class="link" id="btn-calib" type="button">실제 크기 보정 열기</button></li>
         <li>홈 화면에서 실행한 UX Player와 Safari 탭은 저장 공간이 따로입니다. 늘 같은 곳(홈 화면 앱)에서 가져오고 재생하세요.</li>
       </ul>
       <p class="version" id="version"></p>

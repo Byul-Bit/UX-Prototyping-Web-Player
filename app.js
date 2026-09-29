@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -222,17 +222,134 @@ const Zip = {
 // ---------------------------------------------------------------------------
 // Project model helpers (same rules as the Mac / iPad app)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Real-size calibration
+//   CSS px on this iPad -> physical pixels. Normally 2, but iPadOS Display Zoom
+//   ("더 많은 공간") makes the logical screen larger, so everything drawn at 2 px/pt
+//   comes out smaller (e.g. 159 mm shown as ~137 mm on iPad Pro 13").
+//   We detect the iPad from the screen's aspect ratio and compare its native
+//   pixel count with the logical screen size. A manual correction is kept per device.
+// ---------------------------------------------------------------------------
+const IPADS = [
+  { name: 'iPad Air 11"', w: 2360, h: 1640, ppi: 264, scale: 2 },
+  { name: 'iPad Pro 11"', w: 2420, h: 1668, ppi: 264, scale: 2 },
+  { name: 'iPad Air 13"', w: 2732, h: 2048, ppi: 264, scale: 2 },
+  { name: 'iPad Pro 13"', w: 2752, h: 2064, ppi: 264, scale: 2 }
+];
+
+const Calib = {
+  manual() {
+    try {
+      const v = parseFloat(localStorage.getItem('sizeCalibration'));
+      return v > 0.3 && v < 3 ? v : 1;
+    } catch (_) { return 1; }
+  },
+  setManual(v) {
+    try {
+      if (Math.abs(v - 1) < 0.0005) localStorage.removeItem('sizeCalibration');
+      else localStorage.setItem('sizeCalibration', String(v));
+    } catch (_) { /* ignore */ }
+  },
+  /** { physPerCss, ppi, name, detected, zoom } for the current screen. zoom < 1 = Display Zoom '더 많은 공간'. */
+  detect(project, sw = window.screen.width, sh = window.screen.height) {
+    const dev = (project && project.device) || {};
+    const fallback = { physPerCss: dev.scale || 2, ppi: dev.ppi || 264, name: null, detected: false, zoom: 1 };
+    const sl = Math.max(sw, sh), ss = Math.min(sw, sh);
+    if (!(sl > 0 && ss > 0)) return fallback;
+    const aspect = sl / ss;
+    const cands = [];
+    if (dev.nativeWidth && dev.nativeHeight) {
+      cands.push({ name: dev.name, long: Math.max(dev.nativeWidth, dev.nativeHeight), short: Math.min(dev.nativeWidth, dev.nativeHeight), ppi: dev.ppi, scale: dev.scale || 2 });
+    }
+    for (const t of IPADS) cands.push({ name: t.name, long: Math.max(t.w, t.h), short: Math.min(t.w, t.h), ppi: t.ppi, scale: t.scale });
+    let best = null;
+    for (const c of cands) {
+      const a = c.long / c.short;
+      const err = Math.abs(aspect - a) / a;
+      if (err < 0.02 && (!best || err < best.err - 0.002)) best = { ...c, err };   // project device wins near-ties (13" Air/Pro)
+    }
+    if (!best) return fallback;
+    const physPerCss = best.long / sl;
+    return { physPerCss, ppi: best.ppi, name: best.name, detected: true, zoom: physPerCss / best.scale };
+  },
+  /** CSS px per project-native pixel (physical size preserved), including the manual correction. */
+  factor(project) {
+    const c = Calib.detect(project);
+    const devPPI = (project.device && project.device.ppi) || c.ppi;
+    return (c.ppi / devPPI) / c.physPerCss * Calib.manual();
+  },
+  /** CSS px for a length in millimetres on this iPad. */
+  mmToCss(project, mm) {
+    const c = Calib.detect(project);
+    return mm / 25.4 * c.ppi / c.physPerCss * Calib.manual();
+  },
+  describe(project) {
+    const c = Calib.detect(project);
+    const m = Calib.manual();
+    let text;
+    if (!c.detected) text = '이 화면의 iPad 모델을 알아내지 못해 기본 배율(1pt = 2px)을 씁니다.';
+    else if (Math.abs(c.zoom - 1) < 0.01) text = `${c.name} 화면 · 화면 확대/축소 ‘기본’ — 자동 보정 없음`;
+    else text = `${c.name} 화면 · 화면 확대/축소 설정 감지 (${c.zoom < 1 ? '더 많은 공간' : '큰 텍스트'}) — 자동으로 ${Math.round(100 / c.zoom)}% 크기로 보정`;
+    if (Math.abs(m - 1) >= 0.0005) text += ` · 수동 보정 ${(m * 100).toFixed(1)}%`;
+    return text;
+  }
+};
+
+// Full screen (hides Safari UI and the status bar with time/date/battery where iPadOS allows it).
+const FS = {
+  el() { return document.documentElement; },
+  supported() { const e = FS.el(); return !!(e.requestFullscreen || e.webkitRequestFullscreen); },
+  active() { return !!(document.fullscreenElement || document.webkitFullscreenElement); },
+  wanted() { try { return localStorage.getItem('autoFullscreen') !== '0'; } catch (_) { return true; } },
+  setWanted(v) { try { localStorage.setItem('autoFullscreen', v ? '1' : '0'); } catch (_) { /* ignore */ } },
+  enter() {
+    if (!FS.supported() || FS.active()) return;
+    const e = FS.el();
+    try {
+      const p = e.requestFullscreen ? e.requestFullscreen({ navigationUI: 'hide' }) : e.webkitRequestFullscreen();
+      if (p && p.catch) p.catch(() => {});
+    } catch (_) { /* refused */ }
+  },
+  exit() {
+    if (!FS.active()) return;
+    try {
+      const p = document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen();
+      if (p && p.catch) p.catch(() => {});
+    } catch (_) { /* ignore */ }
+  }
+};
+
 const Model = {
   displayPoints(project) {
     const d = project.display, dev = project.device;
     const toPx = (v) => (d.unit === 'px' ? v : v / 25.4 * dev.ppi);
-    const s = dev.scale || 2;
+    const f = Calib.factor(project);
     return {
-      w: toPx(d.width) / s,
-      h: toPx(d.height) / s,
-      ox: toPx(d.offsetX || 0) / s,
-      oy: toPx(d.offsetY || 0) / s
+      w: toPx(d.width) * f,
+      h: toPx(d.height) * f,
+      ox: toPx(d.offsetX || 0) * f,
+      oy: toPx(d.offsetY || 0) * f
     };
+  },
+  /** Scrolling (long image) flow: content size as a multiple of the display, or null. */
+  scrollInfo(project, flow) {
+    const m = flow && flow.media;
+    if (!m || m.kind !== 'image' || !m.scroll) return null;
+    const a = Model.asset(project, m.assetID);
+    if (!a || !(a.pixelWidth > 0) || !(a.pixelHeight > 0)) return null;
+    const d = project.display;
+    if (!(d.width > 0 && d.height > 0)) return null;
+    const displayAspect = d.width / d.height;
+    const imageAspect = a.pixelWidth / a.pixelHeight;
+    if (m.scroll === 'vertical') {
+      const kh = Math.max(1, displayAspect / imageAspect);
+      return kh > 1.001 ? { axis: 'vertical', kw: 1, kh, max: kh - 1 } : null;
+    }
+    if (m.scroll === 'horizontal') {
+      const kw = Math.max(1, imageAspect / displayAspect);
+      return kw > 1.001 ? { axis: 'horizontal', kw, kh: 1, max: kw - 1 } : null;
+    }
+    return null;
   },
   sizeText(project) {
     const d = project.display;
@@ -447,6 +564,11 @@ const Player = {
   showMarks: false,
   size: { w: 0, h: 0, k: 1 },
   wakeLock: null,
+  effects: [],             // playing sound-effect sources
+  scroll: null,            // scrollInfo of the current flow
+  scrollOff: 0,            // display lengths along the scroll axis
+  momentum: null,
+  areaContent: null,
 
   async open(id) {
     const rec = await DB.getProject(id);
@@ -477,6 +599,7 @@ const Player = {
 
   /** Called from the "탭해서 시작" button: unlocks sound and video for the whole session. */
   start() {
+    if (FS.wanted()) FS.enter();   // must run first, inside the tap
     $('start-overlay').hidden = true;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (AC) {
@@ -521,8 +644,10 @@ const Player = {
 
   async decodeAudio() {
     if (!this.audioCtx) return;
-    for (const a of this.project.assets) {
-      if (a.type !== 'audio' || this.audioBuffers.has(a.id)) continue;
+    const sounds = this.project.assets.filter((a) => a.type === 'sfx' || a.type === 'audio');
+    sounds.sort((a, b) => (a.type === 'sfx' ? 0 : 1) - (b.type === 'sfx' ? 0 : 1));   // short effects first
+    for (const a of sounds) {
+      if (this.audioBuffers.has(a.id)) continue;
       const blob = this.blobs.get(a.id);
       if (!blob) continue;
       try {
@@ -557,9 +682,14 @@ const Player = {
     $('player').hidden = true;
     $('menu').hidden = true;
     $('start-overlay').hidden = true;
+    $('calib').hidden = true;
     $('library').hidden = false;
+    FS.exit();
     this.rec = null;
     this.project = null;
+    this.scroll = null;
+    this.scrollOff = 0;
+    this.stopMomentum();
     renderLibrary();
   },
 
@@ -615,16 +745,71 @@ const Player = {
     const box = $('areas');
     box.textContent = '';
     if (!this.showAreas || !this.project) return;
+    this.areaContent = null;
     const flow = Model.flow(this.project, this.currentFlowID);
     if (!flow) return;
+    const sc = this.scroll;
+    const content = h('div', { class: 'area-content' });
+    if (sc) Object.assign(content.style, { width: sc.kw * 100 + '%', height: sc.kh * 100 + '%' });
+    box.append(content);
     for (const a of flow.touchAreas || []) {
       const r = a.rect;
       const code = 'TA-' + String(a.number).padStart(2, '0');
-      box.append(h('div', {
-        class: 'area',
+      const pinned = !!(sc && a.pinned);
+      (sc && !pinned ? content : box).append(h('div', {
+        class: 'area' + (pinned ? ' pinned' : ''),
         style: { left: r.x * 100 + '%', top: r.y * 100 + '%', width: r.w * 100 + '%', height: r.h * 100 + '%' }
-      }, a.name ? `${code} ${a.name}` : code));
+      }, (pinned ? '📌 ' : '') + (a.name ? `${code} ${a.name}` : code)));
     }
+    this.areaContent = content;
+    this.applyScroll();
+  },
+
+  // ---------------- Scrolling (long images) ----------------
+  scrollTransform(len) {
+    const sc = this.scroll;
+    if (!sc) return '';
+    const pct = -this.scrollOff / len * 100;
+    return sc.axis === 'vertical' ? `translate3d(0, ${pct}%, 0)` : `translate3d(${pct}%, 0, 0)`;
+  },
+  applyScroll() {
+    const sc = this.scroll;
+    if (!sc) return;
+    const len = sc.axis === 'vertical' ? sc.kh : sc.kw;
+    const t = this.scrollTransform(len);
+    if (this.currentLayer && this.currentLayer._scrollImg) this.currentLayer._scrollImg.style.transform = t;
+    if (this.areaContent) this.areaContent.style.transform = t;
+  },
+  setScroll(v) {
+    if (!this.scroll) return;
+    this.scrollOff = clamp(v, 0, this.scroll.max);
+    this.applyScroll();
+  },
+  stopMomentum() {
+    if (this.momentum) cancelAnimationFrame(this.momentum);
+    this.momentum = null;
+  },
+  /** Momentum after the finger lifts. vel = display lengths per second. */
+  fling(vel) {
+    this.stopMomentum();
+    if (!this.scroll || Math.abs(vel) < 0.15) return;
+    let last = performance.now();
+    const step = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      vel *= Math.exp(-dt / 0.33);
+      const before = this.scrollOff;
+      this.setScroll(this.scrollOff + vel * dt);
+      if (Math.abs(vel) < 0.03 || (dt > 0 && this.scrollOff === before)) { this.momentum = null; return; }
+      this.momentum = requestAnimationFrame(step);
+    };
+    this.momentum = requestAnimationFrame(step);
+  },
+  /** Point on the whole long image (normalized) for a point on the display. */
+  contentPoint(x, y) {
+    const sc = this.scroll;
+    if (!sc) return { x, y };
+    return sc.axis === 'vertical' ? { x, y: (y + this.scrollOff) / sc.kh } : { x: (x + this.scrollOff) / sc.kw, y };
   },
 
   // ---------------- Rendering ----------------
@@ -638,10 +823,30 @@ const Player = {
     layers.textContent = '';
     const layer = h('div', { class: 'layer' });
     if (flow && flow.media.kind === 'image' && this.urls.get(flow.media.assetID)) {
-      layer.append(h('img', { src: this.urls.get(flow.media.assetID), alt: '', style: { objectFit: this.fitCSS(flow.media.fit) } }));
+      this.appendImage(layer, flow, this.urls.get(flow.media.assetID));
     }
     layers.append(layer);
     this.currentLayer = layer;
+  },
+
+  appendImage(layer, flow, url) {
+    const sc = Model.scrollInfo(this.project, flow);
+    if (sc) {
+      const img = h('img', { src: url, alt: '', decoding: 'async', class: 'scroll',
+        style: { width: sc.kw * 100 + '%', height: sc.kh * 100 + '%' } });
+      layer._scrollImg = img;
+      layer.append(img);
+    } else {
+      layer.append(h('img', { src: url, alt: '', decoding: 'async', style: { objectFit: this.fitCSS(flow.media.fit) } }));
+    }
+  },
+
+  /** Makes `flow` the current one for scrolling and resets the scroll position. */
+  setCurrent(flow) {
+    this.stopMomentum();
+    this.currentFlowID = flow.id;
+    this.scroll = Model.scrollInfo(this.project, flow);
+    this.scrollOff = 0;
   },
 
   makeLayer(flow, token) {
@@ -649,7 +854,7 @@ const Player = {
     const m = flow.media;
     const url = m.assetID ? this.urls.get(m.assetID) : null;
     if (m.kind === 'image' && url) {
-      layer.append(h('img', { src: url, alt: '', decoding: 'async', style: { objectFit: this.fitCSS(m.fit) } }));
+      this.appendImage(layer, flow, url);
     } else if (m.kind === 'video' && url) {
       const v = this.videoPool.find((x) => !x._busy) || this.videoPool[0];
       if (v) {
@@ -706,7 +911,7 @@ const Player = {
     const first = Model.flow(this.project, fromFlowID) || Model.startFlow(this.project);
     if (!first) return;
     this.token++;
-    this.currentFlowID = first.id;
+    this.setCurrent(first);
     for (const old of Array.from($('layers').children)) this.releaseLayer(old);
     const layer = this.makeLayer(first, this.token);
     $('layers').append(layer);
@@ -767,9 +972,14 @@ const Player = {
     const flow = Model.flow(this.project, this.currentFlowID);
     if (!flow) return;
     if (input.type === 'tap') {
-      const areas = (flow.touchAreas || []).slice().reverse();
+      const sc = this.scroll;
+      let areas = (flow.touchAreas || []).slice().reverse();
+      // Scrolling flow: areas pinned to the screen come first, the rest are placed on the whole image.
+      if (sc) areas = areas.filter((a) => a.pinned).concat(areas.filter((a) => !a.pinned));
+      const cp = this.contentPoint(input.x, input.y);
       for (const a of areas) {
-        if (Model.contains(a.rect, input.x, input.y)) {
+        const p = sc && !a.pinned ? cp : input;
+        if (Model.contains(a.rect, p.x, p.y)) {
           const c = Model.connection(flow, 'touchArea:' + a.id);
           if (c) { this.go(c); return; }
         }
@@ -788,6 +998,7 @@ const Player = {
     clearTimeout(this.autoTimer);
     clearTimeout(this.transitionTimer);
     this.phase = 'transitioning';
+    this.playEffect(c);
     if (this.entryAudio && this.entryAudio.stopOnExit) this.stopSource(this.entryAudio.src);
     const style = (c.transition && c.transition.style) || 'none';
     const duration = style === 'none' ? 0 : Math.max((c.transition && c.transition.duration) || 0, 0.05);
@@ -795,7 +1006,7 @@ const Player = {
     const token = this.token;
     const oldLayer = this.currentLayer;
     const newLayer = this.makeLayer(target, token);
-    this.currentFlowID = target.id;
+    this.setCurrent(target);
     this.currentLayer = newLayer;
     $('layers').append(newLayer);
     this.renderAreas();
@@ -853,6 +1064,26 @@ const Player = {
     this.entryAudio = item;
   },
 
+  /** Interaction sound effect: right away or after its delay, at its volume. Keeps playing across flows. */
+  playEffect(c) {
+    const s = c.sound;
+    if (!s || !s.assetID || !this.audioCtx) return;
+    const buffer = this.audioBuffers.get(s.assetID);
+    if (!buffer) return;
+    try {
+      const ctx = this.audioCtx;
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = clamp(typeof s.volume === 'number' ? s.volume : 1, 0, 1);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.onended = () => { this.effects = this.effects.filter((x) => x !== src); };
+      src.start(ctx.currentTime + Math.max(s.delay || 0, 0));
+      this.effects.push(src);
+    } catch (_) { /* ignore */ }
+  },
+
   stopSource(src) {
     try { src.stop(); } catch (_) { /* already stopped */ }
   },
@@ -862,6 +1093,8 @@ const Player = {
     for (const x of this.lingering) this.stopSource(x.src);
     this.entryAudio = null;
     this.lingering = [];
+    for (const src of this.effects) this.stopSource(src);
+    this.effects = [];
   },
 
   // ---------------- Menu ----------------
@@ -871,6 +1104,8 @@ const Player = {
     $('menu-title').textContent = flow ? (flow.name ? `Flow ${String(flow.number).padStart(2, '0')} · ${flow.name}` : `Flow ${String(flow.number).padStart(2, '0')}`) : '';
     $('m-areas').textContent = this.showAreas ? 'Touch Area 숨기기' : 'Touch Area 보기';
     $('m-marks').textContent = this.showMarks ? '터치 표시 끄기' : '터치 표시 켜기';
+    $('m-full').hidden = !FS.supported();
+    $('m-full').textContent = FS.active() ? '전체 화면 끄기' : '전체 화면으로';
     $('menu').hidden = false;
   },
 
@@ -894,10 +1129,14 @@ function setupStageInput() {
     activePointers.add(e.pointerId);
     if (activePointers.size > 1) { track = null; return; }
     const r = hit.getBoundingClientRect();
+    Player.stopMomentum();
     track = {
       id: e.pointerId,
       x0: e.clientX - r.left,
       y0: e.clientY - r.top,
+      cx0: e.clientX,
+      cy0: e.clientY,
+      s0: Player.scrollOff,
       t0: performance.now(),
       samples: [{ x: e.clientX, y: e.clientY, t: performance.now() }]
     };
@@ -908,6 +1147,17 @@ function setupStageInput() {
     if (!track || e.pointerId !== track.id) return;
     track.samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
     if (track.samples.length > 12) track.samples.shift();
+    // Long image: the content follows the finger along the scroll axis.
+    const sc = Player.scroll;
+    if (sc && Player.phase !== 'transitioning' && $('start-overlay').hidden && $('menu').hidden) {
+      const r = hit.getBoundingClientRect();
+      const dx = e.clientX - track.cx0, dy = e.clientY - track.cy0;
+      const along = sc.axis === 'vertical' ? dy : dx;
+      const cross = sc.axis === 'vertical' ? dx : dy;
+      const len = sc.axis === 'vertical' ? r.height : r.width;
+      if (Math.abs(cross) > Math.abs(along) * 1.2) Player.setScroll(track.s0);
+      else if (len > 0) Player.setScroll(track.s0 - along / len);
+    }
   });
   const finish = (e, cancelled) => {
     activePointers.delete(e.pointerId);
@@ -926,6 +1176,13 @@ function setupStageInput() {
     for (const s of t.samples) { if (now - s.t <= 80) { ref = s; break; } }
     const dt = Math.max((now - ref.t) / 1000, 0.001);
     const speed = Math.hypot(e.clientX - ref.x, e.clientY - ref.y) / dt;
+    const sc = Player.scroll;
+    const flingNow = () => {
+      if (!sc) return;
+      const v = sc.axis === 'vertical' ? (e.clientY - ref.y) / dt : (e.clientX - ref.x) / dt;
+      const len = sc.axis === 'vertical' ? r.height : r.width;
+      if (len > 0 && now - ref.t < 200) Player.fling(-v / len);
+    };
 
     if (dist < TAP_MAX_DISTANCE && dur < TAP_MAX_DURATION) {
       if (r.width > 0 && r.height > 0) {
@@ -934,11 +1191,20 @@ function setupStageInput() {
       }
       return;
     }
-    if (!(dist >= SWIPE_MIN_DISTANCE || (speed >= FLICK_MIN_SPEED && dist >= FLICK_MIN_DISTANCE))) return;
+    if (!(dist >= SWIPE_MIN_DISTANCE || (speed >= FLICK_MIN_SPEED && dist >= FLICK_MIN_DISTANCE))) { flingNow(); return; }
     let direction = null;
     if (Math.abs(dx) >= Math.abs(dy) * AXIS_DOMINANCE) direction = dx < 0 ? 'left' : 'right';
     else if (Math.abs(dy) >= Math.abs(dx) * AXIS_DOMINANCE) direction = dy < 0 ? 'up' : 'down';
-    if (!direction) return;
+    if (!direction) { flingNow(); return; }
+    if (sc) {
+      const along = sc.axis === 'vertical' ? (direction === 'up' || direction === 'down') : (direction === 'left' || direction === 'right');
+      if (along) {
+        // Along the scroll axis a drag scrolls; it works as a Swipe only when the image was already at its end.
+        const towardEnd = direction === 'up' || direction === 'left';
+        const atEdge = towardEnd ? t.s0 >= sc.max - 0.001 : t.s0 <= 0.001;
+        if (!atEdge) { flingNow(); return; }
+      }
+    }
     Player.addMark(x1, y1, true);
     Player.handle({ type: 'swipe', direction });
   };
@@ -973,7 +1239,20 @@ function setupKeyboard() {
       return;
     }
     const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
-    if (map[e.key]) { e.preventDefault(); Player.handle({ type: 'swipe', direction: map[e.key] }); return; }
+    if (map[e.key]) {
+      e.preventDefault();
+      const d = map[e.key], sc = Player.scroll;
+      if (sc && Player.phase !== 'transitioning') {
+        const along = sc.axis === 'vertical' ? (d === 'up' || d === 'down') : (d === 'left' || d === 'right');
+        const forward = d === 'down' || d === 'right';   // arrow keys move the view like a page
+        if (along && (forward ? Player.scrollOff < sc.max - 0.001 : Player.scrollOff > 0.001)) {
+          Player.setScroll(Player.scrollOff + (forward ? 0.4 : -0.4));
+          return;
+        }
+      }
+      Player.handle({ type: 'swipe', direction: d });
+      return;
+    }
     if (e.key === 'Escape') { Player.close(); return; }
     if (e.key === 'r' || e.key === 'R') { Player.run(); return; }
     if (e.key === 't' || e.key === 'T') { Player.showAreas = !Player.showAreas; Player.renderAreas(); }
@@ -983,6 +1262,27 @@ function setupKeyboard() {
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Real-size calibration sheet: a 100 mm bar to check with a ruler
+// ---------------------------------------------------------------------------
+function calibProject() {
+  return Player.project || { device: { name: '', nativeWidth: 0, nativeHeight: 0, ppi: 264, scale: 2 } };
+}
+function renderCalibration() {
+  const p = calibProject();
+  $('c-status').textContent = Calib.describe(p);
+  $('c-bar').style.width = Calib.mmToCss(p, 100) + 'px';
+  $('c-value').textContent = `수동 보정 ${(Calib.manual() * 100).toFixed(1)}%`;
+}
+function nudgeCalibration(d) {
+  Calib.setManual(clamp(Math.round((Calib.manual() + d) * 1000) / 1000, 0.5, 1.5));
+  renderCalibration();
+}
+function openCalibration() {
+  renderCalibration();
+  $('calib').hidden = false;
+}
+
 function isStandalone() {
   return window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
 }
@@ -1012,7 +1312,25 @@ function setup() {
   $('m-areas').addEventListener('click', () => { Player.showAreas = !Player.showAreas; Player.renderAreas(); $('menu').hidden = true; });
   $('m-marks').addEventListener('click', () => { Player.showMarks = !Player.showMarks; $('menu').hidden = true; });
   $('m-exit').addEventListener('click', () => Player.close());
-  $('m-close').addEventListener('click', () => { $('menu').hidden = true; });
+  $('m-close').addEventListener('click', () => {
+    $('menu').hidden = true;
+    if (FS.wanted()) FS.enter();   // back to full screen if the user left it
+  });
+  $('m-full').addEventListener('click', () => {
+    $('menu').hidden = true;
+    if (FS.active()) { FS.setWanted(false); FS.exit(); } else { FS.setWanted(true); FS.enter(); }
+  });
+  $('m-calib').addEventListener('click', () => { $('menu').hidden = true; openCalibration(); });
+  $('btn-calib').addEventListener('click', () => openCalibration());
+  $('c-minus').addEventListener('click', () => nudgeCalibration(-0.01));
+  $('c-minus-s').addEventListener('click', () => nudgeCalibration(-0.002));
+  $('c-plus-s').addEventListener('click', () => nudgeCalibration(0.002));
+  $('c-plus').addEventListener('click', () => nudgeCalibration(0.01));
+  $('c-reset').addEventListener('click', () => { Calib.setManual(1); renderCalibration(); });
+  $('c-close').addEventListener('click', () => { $('calib').hidden = true; Player.layout(); });
+  const onFS = () => setTimeout(() => Player.layout(), 60);
+  document.addEventListener('fullscreenchange', onFS);
+  document.addEventListener('webkitfullscreenchange', onFS);
 
   window.addEventListener('resize', () => Player.layout());
   window.addEventListener('orientationchange', () => setTimeout(() => Player.layout(), 200));
@@ -1039,5 +1357,5 @@ if (!window.indexedDB) {
 }
 
 // Exposed for automated tests.
-window.__uxplayer = { Player, DB, Zip, Model, importFiles, VERSION };
+window.__uxplayer = { Player, DB, Zip, Model, Calib, FS, importFiles, VERSION };
 })();

@@ -202,6 +202,23 @@ button { font: inherit; color: inherit; }
   height: 100%;
   pointer-events: none;
 }
+.layer img.scroll {
+  inset: auto;
+  left: 0;
+  top: 0;
+  object-fit: fill;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.area-content {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+}
+.area.pinned { border-color: #bf5af2; background: rgba(191, 90, 242, 0.18); color: #d9a6ff; }
 .area {
   position: absolute;
   border: 2px solid #ffd60a;
@@ -242,3 +259,22 @@ button { font: inherit; color: inherit; }
 .start-card h2 { margin: 0 0 4px; }
 .start-card p { color: var(--sub); margin: 0 0 18px; }
 .start-card .hint { font-size: 13px; margin: 16px 0 6px; }
+
+.calib-card { max-width: 760px; }
+.calib-card h2 { margin: 0 0 4px; }
+.calib-bar-wrap { margin: 22px 0 10px; overflow: hidden; }
+.calib-bar {
+  height: 34px;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 1px, transparent 1px 10%) , color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--accent);
+}
+.calib-help { font-size: 14px; color: var(--sub); }
+.calib-row { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+.calib-value { min-width: 130px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.calib-bar span { background: var(--card); padding: 0 8px; border-radius: 4px; }
